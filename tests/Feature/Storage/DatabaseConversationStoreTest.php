@@ -17,6 +17,7 @@ use Laravel\Ai\Messages\AssistantMessage;
 use Laravel\Ai\Messages\Message;
 use Laravel\Ai\Messages\ToolResultMessage;
 use Laravel\Ai\Messages\UserMessage;
+use Laravel\Ai\Models\Conversation;
 use Laravel\Ai\Prompts\AgentPrompt;
 use Laravel\Ai\Responses\AgentResponse;
 use Laravel\Ai\Responses\Data\Meta;
@@ -102,7 +103,13 @@ test('it persists tool calls and results from a remembered agent prompt', functi
     ]);
 
     $user = (object) ['id' => 1];
-    $conversationId = (new DatabaseConversationStore)->storeConversation('user', $user->id, 'Tool conversation');
+
+    // A plain object's participant type is its class name, not "user"...
+    $conversationId = (new DatabaseConversationStore)->storeConversation(
+        Conversation::participantType($user),
+        Conversation::participantKey($user),
+        'Tool conversation',
+    );
 
     (new RememberingToolUsingAgent)
         ->continue($conversationId, $user)

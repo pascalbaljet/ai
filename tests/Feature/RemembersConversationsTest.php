@@ -50,6 +50,11 @@ test('it threads the participant type into latestConversationId when continuing 
             return 'assistant-1';
         }
 
+        public function conversationBelongsTo(string $conversationId, ?string $participantType, string|int|null $participantId): bool
+        {
+            return true;
+        }
+
         public function getLatestConversationMessages(string $conversationId, int $limit): Collection
         {
             return new Collection;
@@ -97,6 +102,11 @@ test('it continues the last conversation through a store that ignores the partic
         public function storeAssistantMessage(string $conversationId, ?string $participantType, string|int|null $participantId, AgentPrompt $prompt, AgentResponse $response): ?string
         {
             return 'assistant-1';
+        }
+
+        public function conversationBelongsTo(string $conversationId, ?string $participantType, string|int|null $participantId): bool
+        {
+            return true;
         }
 
         public function getLatestConversationMessages(string $conversationId, int $limit): Collection
@@ -155,6 +165,11 @@ test('it resolves the participant id via getKey for models with custom primary k
         public function storeAssistantMessage(string $conversationId, ?string $participantType, string|int|null $participantId, AgentPrompt $prompt, AgentResponse $response): ?string
         {
             return 'assistant-1';
+        }
+
+        public function conversationBelongsTo(string $conversationId, ?string $participantType, string|int|null $participantId): bool
+        {
+            return true;
         }
 
         public function getLatestConversationMessages(string $conversationId, int $limit): Collection

@@ -3,6 +3,7 @@
 namespace Laravel\Ai\Concerns;
 
 use Laravel\Ai\Contracts\ConversationStore;
+use Laravel\Ai\Exceptions\ConversationOwnershipException;
 use Laravel\Ai\Models\Conversation;
 
 trait RemembersConversations
@@ -73,11 +74,36 @@ trait RemembersConversations
             return [];
         }
 
-        return resolve(ConversationStore::class)
-            ->getLatestConversationMessages(
-                $this->conversationId,
-                $this->maxConversationMessages()
-            )->all();
+        $store = resolve(ConversationStore::class);
+
+        $this->assertConversationBelongsToParticipant($store);
+
+        return $store->getLatestConversationMessages(
+            $this->conversationId,
+            $this->maxConversationMessages()
+        )->all();
+    }
+
+    /**
+     * Refuse to read a conversation that belongs to another participant.
+     *
+     * @throws ConversationOwnershipException
+     */
+    protected function assertConversationBelongsToParticipant(ConversationStore $store): void
+    {
+        if ($this->conversationUser === null) {
+            return;
+        }
+
+        $belongsToParticipant = $store->conversationBelongsTo(
+            $this->conversationId,
+            Conversation::participantType($this->conversationUser),
+            Conversation::participantKey($this->conversationUser),
+        );
+
+        if (! $belongsToParticipant) {
+            throw new ConversationOwnershipException($this->conversationId);
+        }
     }
 
     /**

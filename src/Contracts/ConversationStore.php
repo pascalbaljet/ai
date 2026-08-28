@@ -39,6 +39,11 @@ interface ConversationStore
     public function getLatestConversationMessages(string $conversationId, int $limit): Collection;
 
     /**
+     * Determine whether the given conversation belongs to the given participant.
+     */
+    public function conversationBelongsTo(string $conversationId, ?string $participantType, string|int|null $participantId): bool;
+
+    /**
      * Durably record resolved approval results on the paused turn before the run continues.
      *
      * @param  array<int, ToolResult>  $toolResults

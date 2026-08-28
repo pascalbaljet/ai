@@ -29,6 +29,11 @@ class FakeConversationStore implements ConversationStore
         return 'assistant-message-123';
     }
 
+    public function conversationBelongsTo(string $conversationId, ?string $participantType, string|int|null $participantId): bool
+    {
+        return true;
+    }
+
     public function getLatestConversationMessages(string $conversationId, int $limit): Collection
     {
         return new Collection;

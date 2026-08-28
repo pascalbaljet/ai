@@ -8,6 +8,7 @@ use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\ConversationStore;
 use Laravel\Ai\Contracts\Providers\TextProvider;
 use Laravel\Ai\Contracts\RemembersConversations;
+use Laravel\Ai\Exceptions\ConversationOwnershipException;
 use Laravel\Ai\Messages\UserMessage;
 use Laravel\Ai\Models\Conversation;
 use Laravel\Ai\Prompts\AgentPrompt;
@@ -32,6 +33,8 @@ class RememberConversation
     {
         /** @var Agent&RemembersConversations $agent */
         $agent = $prompt->agent;
+
+        $this->assertConversationBelongsToParticipant($agent);
 
         $pendingConversationId = $agent->currentConversation() === null
             ? (string) Str::uuid7()
@@ -99,6 +102,33 @@ class RememberConversation
                 $participant,
             )->withStoredMessages($userMessageId, $assistantMessageId);
         });
+    }
+
+    /**
+     * Refuse a turn aimed at a conversation that belongs to another participant.
+     *
+     * @param  Agent&RemembersConversations  $agent
+     *
+     * @throws ConversationOwnershipException
+     */
+    protected function assertConversationBelongsToParticipant(Agent $agent): void
+    {
+        $conversationId = $agent->currentConversation();
+        $participant = $agent->conversationParticipant();
+
+        if ($conversationId === null || $participant === null) {
+            return;
+        }
+
+        $belongsToParticipant = $this->store->conversationBelongsTo(
+            $conversationId,
+            Conversation::participantType($participant),
+            Conversation::participantKey($participant),
+        );
+
+        if (! $belongsToParticipant) {
+            throw new ConversationOwnershipException($conversationId);
+        }
     }
 
     /**

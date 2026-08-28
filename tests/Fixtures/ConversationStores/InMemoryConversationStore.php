@@ -60,6 +60,18 @@ class InMemoryConversationStore implements ConversationStore
         return $id;
     }
 
+    public function conversationBelongsTo(string $conversationId, ?string $participantType, string|int|null $participantId): bool
+    {
+        $conversation = $this->conversations[$conversationId] ?? null;
+
+        if ($conversation === null || $conversation['participant_type'] === null) {
+            return true;
+        }
+
+        return $conversation['participant_type'] === $participantType
+            && (string) $conversation['participant_id'] === (string) $participantId;
+    }
+
     public function getLatestConversationMessages(string $conversationId, int $limit): Collection
     {
         return collect($this->messages)

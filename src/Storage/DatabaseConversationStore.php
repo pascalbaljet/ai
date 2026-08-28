@@ -43,6 +43,24 @@ class DatabaseConversationStore implements ConversationStore
     }
 
     /**
+     * Determine whether the given conversation belongs to the given participant.
+     */
+    public function conversationBelongsTo(string $conversationId, ?string $participantType, string|int|null $participantId): bool
+    {
+        $conversation = $this->table($this->conversationsTable())
+            ->where('id', $conversationId)
+            ->first();
+
+        // An unknown conversation, or one stored without a participant, belongs to nobody in particular...
+        if ($conversation === null || $conversation->participant_type === null) {
+            return true;
+        }
+
+        return $conversation->participant_type === $participantType
+            && (string) $conversation->participant_id === (string) $participantId;
+    }
+
+    /**
      * Store a new conversation and return its ID.
      */
     public function storeConversation(?string $participantType, string|int|null $participantId, string $title, ?string $id = null): string
