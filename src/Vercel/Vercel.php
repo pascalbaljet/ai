@@ -3,6 +3,7 @@
 namespace Laravel\Ai\Vercel;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -102,6 +103,12 @@ class Vercel
             $parts[] = ['type' => 'text', 'text' => $message->content];
         }
 
+        if ($message instanceof ConversationMessage) {
+            foreach (static::citationPartsFrom($message) as $part) {
+                $parts[] = $part;
+            }
+        }
+
         foreach (static::attachmentsFrom($message) as $attachment) {
             if ($part = static::uiFilePartFrom($attachment)) {
                 $parts[] = $part;
@@ -127,6 +134,27 @@ class Vercel
         }
 
         return $parts;
+    }
+
+    /**
+     * Get the source parts for the citations a stored turn recorded.
+     *
+     * @return list<array<string, mixed>>
+     */
+    protected static function citationPartsFrom(ConversationMessage $message): array
+    {
+        return (new Collection($message->meta['citations'] ?? []))
+            ->filter(fn (mixed $citation): bool => is_array($citation)
+                && is_string($citation['url'] ?? null)
+                && filled($citation['url']))
+            ->map(fn (array $citation): array => Arr::whereNotNull([
+                'type' => 'source-url',
+                'sourceId' => $citation['url'],
+                'url' => $citation['url'],
+                'title' => $citation['title'] ?? null,
+            ]))
+            ->values()
+            ->all();
     }
 
     /**

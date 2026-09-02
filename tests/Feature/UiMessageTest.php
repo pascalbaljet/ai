@@ -375,6 +375,71 @@ describe('hydrating useChat from stored messages', function () {
         ]);
     });
 
+    test('conversation message citations hydrate as source url parts', function () {
+        $ui = Vercel::toUiMessages([
+            new ConversationMessage([
+                'id' => 'msg-2',
+                'role' => 'assistant',
+                'content' => 'Laravel is a PHP framework.',
+                'meta' => ['citations' => [
+                    ['url' => 'https://laravel.com/docs', 'title' => 'Laravel Documentation'],
+                    ['url' => 'https://example.com/source'],
+                ]],
+                'tool_calls' => [['id' => 'call-1', 'name' => 'getWeather', 'arguments' => ['city' => 'Lisbon']]],
+            ]),
+        ]);
+
+        expect($ui[0]['parts'])->toBe([
+            ['type' => 'text', 'text' => 'Laravel is a PHP framework.'],
+            ['type' => 'source-url', 'sourceId' => 'https://laravel.com/docs', 'url' => 'https://laravel.com/docs', 'title' => 'Laravel Documentation'],
+            ['type' => 'source-url', 'sourceId' => 'https://example.com/source', 'url' => 'https://example.com/source'],
+            [
+                'type' => 'tool-getWeather',
+                'toolCallId' => 'call-1',
+                'state' => 'input-available',
+                'input' => ['city' => 'Lisbon'],
+            ],
+        ]);
+    });
+
+    test('conversation messages without citations do not gain source url parts', function () {
+        $ui = Vercel::toUiMessages([
+            new ConversationMessage([
+                'id' => 'msg-2',
+                'role' => 'assistant',
+                'content' => 'No sources.',
+                'meta' => ['citations' => []],
+            ]),
+        ]);
+
+        expect($ui[0]['parts'])->toBe([
+            ['type' => 'text', 'text' => 'No sources.'],
+        ]);
+    });
+
+    test('malformed conversation message citations are skipped', function () {
+        $ui = Vercel::toUiMessages([
+            new ConversationMessage([
+                'id' => 'msg-2',
+                'role' => 'assistant',
+                'content' => 'Some sources.',
+                'meta' => ['citations' => [
+                    'https://example.com/not-an-array',
+                    ['title' => 'Missing URL'],
+                    ['url' => ''],
+                    ['url' => '   ', 'title' => 'Blank URL'],
+                    ['url' => ['https://example.com/bad']],
+                    ['url' => 'https://example.com/valid', 'title' => null],
+                ]],
+            ]),
+        ]);
+
+        expect($ui[0]['parts'])->toBe([
+            ['type' => 'text', 'text' => 'Some sources.'],
+            ['type' => 'source-url', 'sourceId' => 'https://example.com/valid', 'url' => 'https://example.com/valid'],
+        ]);
+    });
+
     test('a completed tool turn hydrates as a settled tool part instead of a blank bubble', function () {
         $ui = Vercel::toUiMessages([
             new ConversationMessage([
