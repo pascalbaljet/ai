@@ -3,6 +3,7 @@
 namespace Laravel\Ai\Vercel;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -73,10 +74,13 @@ class Vercel
                 }
             }
 
+            $metadata = $message instanceof ConversationMessage ? static::uiMetadataFrom($message) : [];
+
             $result[] = [
                 'id' => $message instanceof ConversationMessage ? $message->id : (string) Str::ulid(),
                 'role' => $role,
                 'parts' => $parts,
+                ...($metadata === [] ? [] : ['metadata' => $metadata]),
             ];
 
             if ($message instanceof ConversationMessage) {
@@ -87,6 +91,19 @@ class Vercel
         }
 
         return $result;
+    }
+
+    /**
+     * Get the UI message metadata for a stored conversation message.
+     *
+     * @return array<string, mixed>
+     */
+    protected static function uiMetadataFrom(ConversationMessage $message): array
+    {
+        // Reported as metadata because the Vercel UI message has no top-level timestamp field...
+        return Arr::whereNotNull([
+            'createdAt' => $message->created_at?->toJSON(),
+        ]);
     }
 
     /**

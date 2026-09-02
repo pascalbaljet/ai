@@ -375,6 +375,31 @@ describe('hydrating useChat from stored messages', function () {
         ]);
     });
 
+    test('conversation message models include their created at timestamp as metadata', function () {
+        $createdAt = now()->parse('2026-01-02 03:04:05', 'UTC');
+
+        $ui = Vercel::toUiMessages([
+            new ConversationMessage(['id' => 'msg-1', 'role' => 'user', 'content' => 'Hello', 'created_at' => $createdAt]),
+        ]);
+
+        expect($ui)->toBe([
+            [
+                'id' => 'msg-1',
+                'role' => 'user',
+                'parts' => [['type' => 'text', 'text' => 'Hello']],
+                'metadata' => ['createdAt' => $createdAt->toJSON()],
+            ],
+        ]);
+    });
+
+    test('plain message objects do not include metadata', function () {
+        $ui = Vercel::toUiMessages([
+            new Message('user', 'Hello'),
+        ]);
+
+        expect($ui[0])->not->toHaveKey('metadata');
+    });
+
     test('a completed tool turn hydrates as a settled tool part instead of a blank bubble', function () {
         $ui = Vercel::toUiMessages([
             new ConversationMessage([
