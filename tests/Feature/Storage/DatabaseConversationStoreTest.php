@@ -1,5 +1,7 @@
 <?php
 
+use Carbon\CarbonInterface;
+use Illuminate\Contracts\Pagination\CursorPaginator;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
@@ -9,6 +11,8 @@ use Illuminate\Support\Facades\Schema;
 use Laravel\Ai\Approvals\Decision;
 use Laravel\Ai\Approvals\Decisions;
 use Laravel\Ai\Approvals\PendingApproval;
+use Laravel\Ai\Contracts\ConversationStore;
+use Laravel\Ai\Contracts\PaginatesConversations;
 use Laravel\Ai\Contracts\Providers\TextProvider;
 use Laravel\Ai\Exceptions\ApprovalMismatchException;
 use Laravel\Ai\Files\RemoteImage;
@@ -25,9 +29,11 @@ use Laravel\Ai\Responses\Data\ToolResult;
 use Laravel\Ai\Responses\Data\Usage;
 use Laravel\Ai\Responses\StreamedAgentResponse;
 use Laravel\Ai\Storage\DatabaseConversationStore;
+use Laravel\Ai\Storage\StoredMessage;
 use Laravel\Ai\Streaming\Events\ToolApprovalRequest;
 use Tests\Fixtures\Agents\RememberingToolUsingAgent;
 use Tests\Fixtures\Agents\ToolUsingAgent;
+use Tests\Fixtures\FakeConversationStore;
 
 test('it writes conversations to the default tables', function (): void {
     $store = new DatabaseConversationStore;
@@ -65,6 +71,148 @@ test('it routes queries through the configured connection', function (): void {
 
     expect(DB::connection('secondary')->table('agent_conversations')->where('id', $conversationId)->exists())->toBeTrue()
         ->and(DB::table('agent_conversations')->where('id', $conversationId)->exists())->toBeFalse();
+});
+
+test('it paginates conversation messages in cursor order', function (): void {
+    $store = new DatabaseConversationStore;
+    $conversationId = $store->storeConversation('user', 1, 'Transcript');
+
+    DB::table('agent_conversation_messages')->insert(
+        collect(range(1, 5))
+            ->map(fn (int $number): array => storedConversationMessageAttributes("message-00{$number}", $conversationId, "Message {$number}"))
+            ->all()
+    );
+
+    $page = $store->paginateConversationMessages($conversationId, 3);
+
+    expect($store)->toBeInstanceOf(PaginatesConversations::class)
+        ->and($page)->toBeInstanceOf(CursorPaginator::class)
+        ->and($page->items())->toContainOnlyInstancesOf(StoredMessage::class)
+        ->and(collect($page->items())->pluck('id')->all())->toBe([
+            'message-005',
+            'message-004',
+            'message-003',
+        ]);
+});
+
+/*
+ * The JSON columns are the reason this returns a value object rather than the
+ * raw record: a caller rendering a transcript should not be decoding storage.
+ */
+test('it decodes the stored JSON columns', function (): void {
+    $store = new DatabaseConversationStore;
+    $conversationId = $store->storeConversation('user', 1, 'Transcript');
+
+    DB::table('agent_conversation_messages')->insert([
+        ...storedConversationMessageAttributes('message-001', $conversationId, 'Saved the note.'),
+        'role' => 'assistant',
+        'meta' => json_encode(['provider' => 'openai', 'citations' => [['url' => 'https://laravel.com']]]),
+        'tool_calls' => json_encode([['id' => 'call-1', 'name' => 'save_note', 'arguments' => ['a' => 1]]]),
+        'usage' => json_encode(['input_tokens' => 12]),
+    ]);
+
+    $message = $store->paginateConversationMessages($conversationId, 1)->items()[0];
+
+    expect($message->meta['provider'])->toBe('openai')
+        ->and($message->meta['citations'][0]['url'])->toBe('https://laravel.com')
+        ->and($message->toolCalls[0]['name'])->toBe('save_note')
+        ->and($message->usage['input_tokens'])->toBe(12)
+        ->and($message->toolResults)->toBe([])
+        ->and($message->approvalState)->toBeNull()
+        ->and($message->createdAt)->toBeInstanceOf(CarbonInterface::class);
+});
+
+test('it advances to the next cursor page', function (): void {
+    $store = new DatabaseConversationStore;
+    $conversationId = $store->storeConversation('user', 1, 'Transcript');
+
+    DB::table('agent_conversation_messages')->insert(
+        collect(range(1, 5))
+            ->map(fn (int $number): array => storedConversationMessageAttributes("message-00{$number}", $conversationId, "Message {$number}"))
+            ->all()
+    );
+
+    $firstPage = $store->paginateConversationMessages($conversationId, 2);
+    $nextCursor = $firstPage->nextCursor();
+
+    request()->query->set('cursor', $nextCursor?->encode());
+
+    $secondPage = $store->paginateConversationMessages($conversationId, 2);
+
+    expect($nextCursor)->not->toBeNull()
+        ->and(collect($firstPage->items())->pluck('id')->all())->toBe(['message-005', 'message-004'])
+        ->and(collect($secondPage->items())->pluck('id')->all())->toBe(['message-003', 'message-002'])
+        ->and(collect($firstPage->items())->pluck('id')->intersect(collect($secondPage->items())->pluck('id'))->all())->toBe([]);
+});
+
+/*
+ * Two transcripts on one page would otherwise page in lockstep, both reading
+ * `?cursor=`. The caller names the cursor so each has its own.
+ */
+test('it reads the cursor from the given query parameter name', function (): void {
+    $store = new DatabaseConversationStore;
+    $conversationId = $store->storeConversation('user', 1, 'Transcript');
+
+    DB::table('agent_conversation_messages')->insert(
+        collect(range(1, 5))
+            ->map(fn (int $number): array => storedConversationMessageAttributes("message-00{$number}", $conversationId, "Message {$number}"))
+            ->all()
+    );
+
+    $firstPage = $store->paginateConversationMessages($conversationId, 2, 'support');
+
+    request()->query->set('support', $firstPage->nextCursor()?->encode());
+    request()->query->set('cursor', 'ignored');
+
+    $secondPage = $store->paginateConversationMessages($conversationId, 2, 'support');
+
+    expect(collect($secondPage->items())->pluck('id')->all())->toBe(['message-003', 'message-002']);
+});
+
+test('it accepts a cursor passed directly, without a request', function (): void {
+    $store = new DatabaseConversationStore;
+    $conversationId = $store->storeConversation('user', 1, 'Transcript');
+
+    DB::table('agent_conversation_messages')->insert(
+        collect(range(1, 5))
+            ->map(fn (int $number): array => storedConversationMessageAttributes("message-00{$number}", $conversationId, "Message {$number}"))
+            ->all()
+    );
+
+    $firstPage = $store->paginateConversationMessages($conversationId, 2);
+
+    $secondPage = $store->paginateConversationMessages($conversationId, 2, cursor: $firstPage->nextCursor());
+
+    expect(collect($secondPage->items())->pluck('id')->all())->toBe(['message-003', 'message-002']);
+});
+
+test('it scopes paginated messages to the same conversation as latest messages', function (): void {
+    $store = new DatabaseConversationStore;
+    $conversationId = $store->storeConversation('user', 1, 'Target transcript');
+    $otherConversationId = $store->storeConversation('user', 1, 'Other transcript');
+
+    DB::table('agent_conversation_messages')->insert([
+        storedConversationMessageAttributes('message-001', $conversationId, 'Target 1'),
+        storedConversationMessageAttributes('message-002', $otherConversationId, 'Other 2'),
+        storedConversationMessageAttributes('message-003', $conversationId, 'Target 3'),
+        storedConversationMessageAttributes('message-004', $otherConversationId, 'Other 4'),
+        storedConversationMessageAttributes('message-005', $conversationId, 'Target 5'),
+    ]);
+
+    $page = $store->paginateConversationMessages($conversationId, 10);
+    $latestMessages = $store->getLatestConversationMessages($conversationId, 10);
+
+    expect(collect($page->items())->pluck('id')->all())->toBe(['message-005', 'message-003', 'message-001'])
+        ->and(collect($page->items())->pluck('content')->all())->toBe(['Target 5', 'Target 3', 'Target 1'])
+        ->and($latestMessages->pluck('content')->all())->toBe(['Target 1', 'Target 3', 'Target 5']);
+});
+
+test('stores that do not paginate conversations are unaffected', function (): void {
+    $store = new FakeConversationStore;
+
+    expect($store)->toBeInstanceOf(ConversationStore::class)
+        ->and($store)->not->toBeInstanceOf(PaginatesConversations::class)
+        ->and($store->getLatestConversationMessages('conversation-123', 10))->toBeInstanceOf(Collection::class);
 });
 
 test('it persists tool calls and results from a remembered agent prompt', function (): void {
@@ -1187,4 +1335,25 @@ function createConversationSchema(?string $connection = null): void
         $table->text('approval_state')->nullable();
         $table->timestamps();
     });
+}
+
+/** @return array<string, mixed> */
+function storedConversationMessageAttributes(string $id, string $conversationId, string $content): array
+{
+    return [
+        'id' => $id,
+        'conversation_id' => $conversationId,
+        'participant_type' => 'user',
+        'participant_id' => 1,
+        'agent' => ToolUsingAgent::class,
+        'role' => 'user',
+        'content' => $content,
+        'attachments' => '[]',
+        'tool_calls' => '[]',
+        'tool_results' => '[]',
+        'usage' => '[]',
+        'meta' => '[]',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ];
 }
