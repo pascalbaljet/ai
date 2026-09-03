@@ -18,18 +18,29 @@ class TextDelta extends StreamEvent
     /**
      * Combine the text deltas in the given collection of events into a single string.
      *
-     * Deltas from a multi-step generation carry a distinct message ID per step,
-     * and each step's text is a self-contained utterance (typically narration
-     * around a tool call). Steps are therefore joined with a blank line instead
-     * of being run together mid-sentence.
+     * Each step of a multi-step generation is a self-contained utterance —
+     * typically narration around a tool call — so steps are joined with a blank
+     * line instead of being run together mid-sentence.
+     *
+     * The boundary is the step's own `StreamStart`, not a change of message ID.
+     * A provider that cites its sources closes the text block at every citation
+     * and opens the next one mid-sentence, so grouping by message ID broke a
+     * cited answer into a paragraph per clause.
      */
     public static function combine(Collection|array $events): string
     {
-        $events = is_array($events) ? new Collection($events) : $events;
+        $steps = new Collection;
+        $step = 0;
 
-        return $events->whereInstanceOf(TextDelta::class)
-            ->groupBy(fn (TextDelta $event) => $event->messageId)
-            ->map(fn (Collection $deltas) => $deltas->map(fn (TextDelta $event) => $event->delta)->join(''))
+        foreach (Collection::wrap($events) as $event) {
+            if ($event instanceof StreamStart) {
+                $step++;
+            } elseif ($event instanceof TextDelta) {
+                $steps[$step] = ($steps[$step] ?? '').$event->delta;
+            }
+        }
+
+        return $steps
             ->filter(fn (string $text) => trim($text) !== '')
             ->values()
             ->join("\n\n");
