@@ -4,6 +4,7 @@ namespace Laravel\Ai\Responses;
 
 use Illuminate\Support\Collection;
 use Laravel\Ai\Responses\Data\Meta;
+use Laravel\Ai\Streaming\Events\Citation;
 use Laravel\Ai\Streaming\Events\StreamEnd;
 use Laravel\Ai\Streaming\Events\StreamEvent;
 use Laravel\Ai\Streaming\Events\TextDelta;
@@ -34,6 +35,11 @@ class StreamedAgentResponse extends AgentResponse
         );
 
         $this->events = $events;
+
+        // A generated response gets its citations from the parsed body; a streamed one
+        // only ever sees them as events, so the meta it is stored with stays empty
+        // unless the run collects them here...
+        $this->meta->citations = Citation::combine($events);
 
         $this->withPendingApprovals(
             $events->whereInstanceOf(ToolApprovalRequest::class)

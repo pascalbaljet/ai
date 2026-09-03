@@ -7,8 +7,10 @@ use Illuminate\Contracts\Support\Responsable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use IteratorAggregate;
+use Laravel\Ai\Responses\Data\Citation as CitationData;
 use Laravel\Ai\Responses\Data\Meta;
 use Laravel\Ai\Responses\Data\Usage;
+use Laravel\Ai\Streaming\Events\Citation;
 use Laravel\Ai\Streaming\Events\StreamEnd;
 use Laravel\Ai\Streaming\Events\StreamEvent;
 use Laravel\Ai\Streaming\Events\TextDelta;
@@ -26,6 +28,9 @@ class StreamableAgentResponse implements IteratorAggregate, Responsable
 
     /** @var Collection<int, StreamEvent> */
     public Collection $events;
+
+    /** @var Collection<int, CitationData> */
+    public Collection $citations;
 
     public ?string $conversationId = null;
 
@@ -52,6 +57,7 @@ class StreamableAgentResponse implements IteratorAggregate, Responsable
         protected ?Meta $meta = null,
     ) {
         $this->events = new Collection;
+        $this->citations = new Collection;
     }
 
     /**
@@ -199,6 +205,7 @@ class StreamableAgentResponse implements IteratorAggregate, Responsable
 
         $this->events = new Collection($events);
         $this->text = TextDelta::combine($events);
+        $this->citations = Citation::combine($events);
         $this->usage = StreamEnd::combineUsage($events);
 
         $this->streamedResponse = new StreamedAgentResponse(

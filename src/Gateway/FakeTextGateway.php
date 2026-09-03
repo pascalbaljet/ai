@@ -17,6 +17,7 @@ use Laravel\Ai\Responses\Data\ToolCall;
 use Laravel\Ai\Responses\Data\Usage;
 use Laravel\Ai\Responses\StructuredTextResponse;
 use Laravel\Ai\Responses\TextResponse;
+use Laravel\Ai\Streaming\Events\Citation as CitationEvent;
 use Laravel\Ai\Streaming\Events\StreamStart;
 use Laravel\Ai\Streaming\Events\TextDelta;
 use Laravel\Ai\Streaming\Events\TextEnd;
@@ -93,6 +94,12 @@ class FakeTextGateway implements StepTextGateway
             }
 
             yield (new TextEnd(ulid(), $messageId, time()))->withInvocationId($invocationId);
+        }
+
+        // A real provider streams what it cited rather than attaching it to the step,
+        // so a fake that only set the meta would never exercise the event path...
+        foreach ($step->meta->citations as $citation) {
+            yield (new CitationEvent(ulid(), $messageId, $citation, time()))->withInvocationId($invocationId);
         }
 
         foreach ($step->toolCalls as $toolCall) {
