@@ -212,12 +212,20 @@ class AgentUserInteractionProtocol extends StreamProtocol
     protected function runFinishedPart(array $attributes = []): array
     {
         $assistantMessageId = $this->response?->assistantMessageId;
+        $userMessageId = $this->response?->userMessageId;
 
         return [
             'type' => 'RUN_FINISHED',
             'threadId' => $this->threadId,
             'runId' => $this->runId,
             ...($assistantMessageId ? ['messageId' => $assistantMessageId] : []),
+            /*
+             * The prompt's row, alongside the answer's. A client that renders a
+             * turn optimistically holds both messages under ids it invented, and
+             * reporting only one leaves the prompt unable to reconcile with what
+             * was stored. Absent on a resume, which writes no user row.
+             */
+            ...($userMessageId ? ['userMessageId' => $userMessageId] : []),
             ...$attributes,
         ];
     }

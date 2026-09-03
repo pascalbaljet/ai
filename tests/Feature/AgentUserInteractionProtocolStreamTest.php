@@ -195,10 +195,33 @@ test('a remembered stream reports the assistant row it wrote', function () {
     $finished = end($events);
 
     expect($response->assistantMessageId)->not->toBeNull()
-        ->and(array_keys($finished))->toBe(['type', 'threadId', 'runId', 'messageId', 'usage', 'metadata'])
+        ->and(array_keys($finished))->toBe(['type', 'threadId', 'runId', 'messageId', 'userMessageId', 'usage', 'metadata'])
         ->and($finished['threadId'])->toBe($response->conversationId)
         ->and($finished['runId'])->toBe($response->invocationId)
         ->and($finished['messageId'])->toBe($response->assistantMessageId);
+});
+
+/*
+ * Both rows, not just the answer's. A client renders the turn optimistically
+ * under ids it invented, so reporting only the assistant's leaves the prompt
+ * unable to reconcile with what was stored — it keeps a local id until the
+ * whole transcript is read again.
+ */
+test('a stored run reports the row it wrote for the prompt', function () {
+    RememberingAssistantAgent::fake(['Fake response']);
+
+    $user = new class
+    {
+        public int $id = 1;
+    };
+
+    $response = (new RememberingAssistantAgent)->forUser($user)->stream('Hello');
+
+    $events = agUiEvents($response->usingProtocol(new AgentUserInteractionProtocol)->toResponse(request()));
+
+    expect($response->userMessageId)->not->toBeNull()
+        ->and(end($events)['userMessageId'])->toBe($response->userMessageId)
+        ->and($response->userMessageId)->not->toBe($response->assistantMessageId);
 });
 
 test('a stream that persists nothing omits the message id', function () {
@@ -209,7 +232,8 @@ test('a stream that persists nothing omits the message id', function () {
         new StreamEnd('event-4', 'stop', new Usage, time()),
     ]);
 
-    expect(end($events))->not->toHaveKey('messageId');
+    expect(end($events))->not->toHaveKey('messageId')
+        ->and(end($events))->not->toHaveKey('userMessageId');
 });
 
 test('an ownerless approval stream persists the thread id it emits', function () {
