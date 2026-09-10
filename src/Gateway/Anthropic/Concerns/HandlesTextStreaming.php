@@ -55,7 +55,7 @@ trait HandlesTextStreaming
         $usage = null;
         $stopReason = '';
 
-        $emitTextStart = function () use (&$textStartEmitted, $messageId, $invocationId): ?StreamEvent {
+        $emitTextStart = function () use (&$textStartEmitted, &$messageId, $invocationId): ?StreamEvent {
             if ($textStartEmitted) {
                 return null;
             }

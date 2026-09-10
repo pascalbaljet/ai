@@ -25,6 +25,7 @@ use Laravel\Ai\Responses\Data\ToolResult;
 use Laravel\Ai\Responses\Data\Usage;
 use Laravel\Ai\Responses\StreamedAgentResponse;
 use Laravel\Ai\Storage\DatabaseConversationStore;
+use Laravel\Ai\Streaming\Events\Citation as CitationEvent;
 use Laravel\Ai\Streaming\Events\ReasoningDelta;
 use Laravel\Ai\Streaming\Events\ReasoningEnd;
 use Laravel\Ai\Streaming\Events\ReasoningStart;
@@ -1303,6 +1304,58 @@ test('it omits reasoning from the message meta when the model did not reason', f
     $record = DB::table('agent_conversation_messages')->where('role', 'assistant')->first();
 
     expect(json_decode((string) $record->meta, true))->not->toHaveKey('reasoning');
+});
+
+test('it records the sources a streamed turn cited into the message meta', function (): void {
+    $store = new DatabaseConversationStore;
+    $conversationId = $store->storeConversation('user', 1, 'Researched conversation');
+
+    $prompt = new AgentPrompt(
+        new ToolUsingAgent,
+        'What does Laravel MCP do?',
+        [],
+        Mockery::mock(TextProvider::class),
+        'test-model',
+    );
+
+    $response = new StreamedAgentResponse('invocation-id', collect([
+        new TextDelta(uniqid(), 'message-1', 'Laravel MCP ships an MCP server.', time()),
+        new CitationEvent(uniqid(), 'message-1', new UrlCitation('https://laravel.com/docs/mcp', 'Laravel MCP'), time()),
+        new CitationEvent(uniqid(), 'message-1', new UrlCitation('https://laravel.com/docs/mcp', 'Laravel MCP'), time()),
+    ]), new Meta);
+
+    $store->storeAssistantMessage($conversationId, 'user', 1, $prompt, $response);
+
+    $record = DB::table('agent_conversation_messages')->where('role', 'assistant')->first();
+
+    // Every mention is stored, matching what a generated turn records for the same answer...
+    expect(json_decode((string) $record->meta, true)['citations'])->toBe([
+        ['url' => 'https://laravel.com/docs/mcp', 'title' => 'Laravel MCP', 'start_index' => null, 'end_index' => null],
+        ['url' => 'https://laravel.com/docs/mcp', 'title' => 'Laravel MCP', 'start_index' => null, 'end_index' => null],
+    ]);
+});
+
+test('it stores no sources when a streamed turn cited nothing', function (): void {
+    $store = new DatabaseConversationStore;
+    $conversationId = $store->storeConversation('user', 1, 'Unresearched conversation');
+
+    $prompt = new AgentPrompt(
+        new ToolUsingAgent,
+        'How cold is it?',
+        [],
+        Mockery::mock(TextProvider::class),
+        'test-model',
+    );
+
+    $response = new StreamedAgentResponse('invocation-id', collect([
+        new TextDelta(uniqid(), 'message-1', 'It is 12°C.', time()),
+    ]), new Meta);
+
+    $store->storeAssistantMessage($conversationId, 'user', 1, $prompt, $response);
+
+    $record = DB::table('agent_conversation_messages')->where('role', 'assistant')->first();
+
+    expect(json_decode((string) $record->meta, true)['citations'])->toBe([]);
 });
 
 function createConversationSchema(?string $connection = null): void
